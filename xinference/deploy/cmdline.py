@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 import warnings
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import click
 from xoscar.utils import get_next_port
@@ -376,18 +376,27 @@ def worker(
     is_flag=True,
     help="Persist the model configuration to the filesystem, retains the model registration after server restarts.",
 )
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
 def register_model(
     endpoint: Optional[str],
     model_type: str,
     file: str,
     persist: bool,
+    api_key: Optional[str],
 ):
     endpoint = get_endpoint(endpoint)
     with open(file) as fd:
         model = fd.read()
 
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
     client.register_model(
         model_type=model_type,
         model=model,
@@ -408,15 +417,24 @@ def register_model(
     help="Type of model to unregister (default is 'LLM').",
 )
 @click.option("--model-name", "-n", type=str, help="Name of the model to unregister.")
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
 def unregister_model(
     endpoint: Optional[str],
     model_type: str,
     model_name: str,
+    api_key: Optional[str],
 ):
     endpoint = get_endpoint(endpoint)
 
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
     client.unregister_model(
         model_type=model_type,
         model_name=model_name,
@@ -437,15 +455,24 @@ def unregister_model(
     type=str,
     help="Filter by model type (default is 'LLM').",
 )
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
 def list_model_registrations(
     endpoint: Optional[str],
     model_type: str,
+    api_key: Optional[str],
 ):
     from tabulate import tabulate
 
     endpoint = get_endpoint(endpoint)
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
 
     registrations = client.list_model_registrations(model_type=model_type)
 
@@ -543,6 +570,44 @@ def list_model_registrations(
         raise NotImplementedError(f"List {model_type} is not implemented.")
 
 
+@cli.command("cached", help="List all cached models in Xinference.")
+@click.option(
+    "--endpoint",
+    "-e",
+    type=str,
+    help="Xinference endpoint.",
+)
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
+def list_cached_models(
+    endpoint: Optional[str],
+    api_key: Optional[str],
+):
+    from tabulate import tabulate
+
+    endpoint = get_endpoint(endpoint)
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
+
+    cached_models = client.list_cached_models()
+
+    print("cached_model: ")
+    headers = list(cached_models[0].keys())
+    table_data = []
+    for model in cached_models:
+        row_data = [
+            str(value) if value is not None else "-" for value in model.values()
+        ]
+        table_data.append(row_data)
+    print(tabulate(table_data, headers=headers, tablefmt="pretty"))
+
+
 @cli.command(
     "launch",
     help="Launch a model with the Xinference framework with the given parameters.",
@@ -570,6 +635,13 @@ def list_model_registrations(
     type=str,
     default="LLM",
     help="Specify type of model, LLM as default.",
+)
+@click.option(
+    "--model-engine",
+    "-en",
+    type=str,
+    default=None,
+    help="Specify the inference engine of the model when launching LLM.",
 )
 @click.option(
     "--model-uid",
@@ -613,10 +685,11 @@ def list_model_registrations(
     help='The number of GPUs used by the model, default is "auto".',
 )
 @click.option(
-    "--peft-model-path",
-    default=None,
-    type=str,
-    help="PEFT model path.",
+    "--lora-modules",
+    "-lm",
+    multiple=True,
+    type=(str, str),
+    help="LoRA module configurations in the format name=path. Multiple modules can be specified.",
 )
 @click.option(
     "--image-lora-load-kwargs",
@@ -633,10 +706,29 @@ def list_model_registrations(
     multiple=True,
 )
 @click.option(
+    "--worker-ip",
+    default=None,
+    type=str,
+    help="Specify which worker this model runs on by ip, for distributed situation.",
+)
+@click.option(
+    "--gpu-idx",
+    default=None,
+    type=str,
+    help="Specify which GPUs of a worker this model can run on, separated with commas.",
+)
+@click.option(
     "--trust-remote-code",
     default=True,
     type=bool,
     help="Whether or not to allow for custom models defined on the Hub in their own modeling files.",
+)
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
 )
 @click.pass_context
 def model_launch(
@@ -644,16 +736,20 @@ def model_launch(
     endpoint: Optional[str],
     model_name: str,
     model_type: str,
+    model_engine: Optional[str],
     model_uid: str,
     size_in_billions: str,
     model_format: str,
     quantization: str,
     replica: int,
     n_gpu: str,
-    peft_model_path: Optional[str],
+    lora_modules: Optional[Tuple],
     image_lora_load_kwargs: Optional[Tuple],
     image_lora_fuse_kwargs: Optional[Tuple],
+    worker_ip: Optional[str],
+    gpu_idx: Optional[str],
     trust_remote_code: bool,
+    api_key: Optional[str],
 ):
     kwargs = {}
     for i in range(0, len(ctx.args), 2):
@@ -661,6 +757,9 @@ def model_launch(
             raise ValueError("You must specify extra kwargs with `--` prefix.")
         kwargs[ctx.args[i][2:]] = handle_click_args_type(ctx.args[i + 1])
     print(f"Launch model name: {model_name} with kwargs: {kwargs}", file=sys.stderr)
+
+    if model_type == "LLM" and model_engine is None:
+        raise ValueError("--model-engine is required for LLM models.")
 
     if n_gpu.lower() == "none":
         _n_gpu: Optional[Union[int, str]] = None
@@ -680,27 +779,51 @@ def model_launch(
         else None
     )
 
+    lora_list = (
+        [{"lora_name": k, "local_path": v} for k, v in dict(lora_modules).items()]
+        if lora_modules
+        else []
+    )
+
+    peft_model_config = (
+        {
+            "image_lora_load_kwargs": image_lora_load_params,
+            "image_lora_fuse_kwargs": image_lora_fuse_params,
+            "lora_list": lora_list,
+        }
+        if lora_list or image_lora_load_params or image_lora_fuse_params
+        else None
+    )
+
+    _gpu_idx: Optional[List[int]] = (
+        None if gpu_idx is None else [int(idx) for idx in gpu_idx.split(",")]
+    )
+
     endpoint = get_endpoint(endpoint)
     model_size: Optional[Union[str, int]] = (
         size_in_billions
-        if size_in_billions is None or "_" in size_in_billions
+        if size_in_billions is None
+        or "_" in size_in_billions
+        or "." in size_in_billions
         else int(size_in_billions)
     )
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
 
     model_uid = client.launch_model(
         model_name=model_name,
         model_type=model_type,
+        model_engine=model_engine,
         model_uid=model_uid,
         model_size_in_billions=model_size,
         model_format=model_format,
         quantization=quantization,
         replica=replica,
         n_gpu=_n_gpu,
-        peft_model_path=peft_model_path,
-        image_lora_load_kwargs=image_lora_load_params,
-        image_lora_fuse_kwargs=image_lora_fuse_params,
+        peft_model_config=peft_model_config,
+        worker_ip=worker_ip,
+        gpu_idx=_gpu_idx,
         trust_remote_code=trust_remote_code,
         **kwargs,
     )
@@ -718,12 +841,20 @@ def model_launch(
     type=str,
     help="Xinference endpoint.",
 )
-def model_list(endpoint: Optional[str]):
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
+def model_list(endpoint: Optional[str], api_key: Optional[str]):
     from tabulate import tabulate
 
     endpoint = get_endpoint(endpoint)
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
 
     llm_table = []
     embedding_table = []
@@ -844,13 +975,22 @@ def model_list(endpoint: Optional[str]):
     required=True,
     help="The unique identifier (UID) of the model.",
 )
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
 def model_terminate(
     endpoint: Optional[str],
     model_uid: str,
+    api_key: Optional[str],
 ):
     endpoint = get_endpoint(endpoint)
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
     client.terminate_model(model_uid=model_uid)
 
 
@@ -873,15 +1013,24 @@ def model_terminate(
     type=bool,
     help="Whether to stream the generated text. Use 'True' for streaming (default is True).",
 )
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
 def model_generate(
     endpoint: Optional[str],
     model_uid: str,
     max_tokens: int,
     stream: bool,
+    api_key: Optional[str],
 ):
     endpoint = get_endpoint(endpoint)
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
     if stream:
         # TODO: when stream=True, RestfulClient cannot generate words one by one.
         # So use Client in temporary. The implementation needs to be changed to
@@ -959,16 +1108,25 @@ def model_generate(
     type=bool,
     help="Whether to stream the chat messages. Use 'True' for streaming (default is True).",
 )
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
 def model_chat(
     endpoint: Optional[str],
     model_uid: str,
     max_tokens: int,
     stream: bool,
+    api_key: Optional[str],
 ):
     # TODO: chat model roles may not be user and assistant.
     endpoint = get_endpoint(endpoint)
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
 
     chat_history: "List[ChatCompletionMessage]" = []
     if stream:
@@ -1048,10 +1206,18 @@ def model_chat(
 
 @cli.command("vllm-models", help="Query and display models compatible with vLLM.")
 @click.option("--endpoint", "-e", type=str, help="Xinference endpoint.")
-def vllm_models(endpoint: Optional[str]):
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
+def vllm_models(endpoint: Optional[str], api_key: Optional[str]):
     endpoint = get_endpoint(endpoint)
-    client = RESTfulClient(base_url=endpoint)
-    client._set_token(get_stored_token(endpoint, client))
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
     vllm_models_dict = client.vllm_models()
     print("VLLM supported model families:")
     chat_models = vllm_models_dict["chat"]
@@ -1085,6 +1251,247 @@ def cluster_login(
         hashed_ep = get_hash_endpoint(endpoint)
         with open(os.path.join(XINFERENCE_AUTH_DIR, hashed_ep), "w") as f:
             f.write(access_token)
+
+
+@cli.command(name="engine", help="Query the applicable inference engine by model name.")
+@click.option(
+    "--model-name",
+    "-n",
+    type=str,
+    required=True,
+    help="The model name you want to query.",
+)
+@click.option(
+    "--model-engine",
+    "-en",
+    type=str,
+    default=None,
+    help="Specify the `model_engine` to query the corresponding combination of other parameters.",
+)
+@click.option(
+    "--model-format",
+    "-f",
+    type=str,
+    default=None,
+    help="Specify the `model_format` to query the corresponding combination of other parameters.",
+)
+@click.option(
+    "--model-size-in-billions",
+    "-s",
+    type=str,
+    default=None,
+    help="Specify the `model_size_in_billions` to query the corresponding combination of other parameters.",
+)
+@click.option(
+    "--quantization",
+    "-q",
+    type=str,
+    default=None,
+    help="Specify the `quantization` to query the corresponding combination of other parameters.",
+)
+@click.option("--endpoint", "-e", type=str, help="Xinference endpoint.")
+@click.option(
+    "--api-key",
+    "-ak",
+    default=None,
+    type=str,
+    help="Api-Key for access xinference api with authorization.",
+)
+def query_engine_by_model_name(
+    model_name: str,
+    model_engine: Optional[str],
+    model_format: Optional[str],
+    model_size_in_billions: Optional[Union[str, int]],
+    quantization: Optional[str],
+    endpoint: Optional[str],
+    api_key: Optional[str],
+):
+    from tabulate import tabulate
+
+    def match_engine_from_spell(value: str, target: Sequence[str]) -> Tuple[bool, str]:
+        """
+        For better usage experience.
+        """
+        for t in target:
+            if value.lower() == t.lower():
+                return True, t
+        return False, value
+
+    def handle_user_passed_parameters() -> List[str]:
+        user_specified_parameters = []
+        if model_engine is not None:
+            user_specified_parameters.append(f"--model-engine {model_engine}")
+        if model_format is not None:
+            user_specified_parameters.append(f"--model-format {model_format}")
+        if model_size_in_billions is not None:
+            user_specified_parameters.append(
+                f"--model-size-in-billions {model_size_in_billions}"
+            )
+        if quantization is not None:
+            user_specified_parameters.append(f"--quantization {quantization}")
+        return user_specified_parameters
+
+    user_specified_params = handle_user_passed_parameters()
+
+    endpoint = get_endpoint(endpoint)
+    client = RESTfulClient(base_url=endpoint, api_key=api_key)
+    if api_key is None:
+        client._set_token(get_stored_token(endpoint, client))
+
+    llm_engines = client.query_engine_by_model_name(model_name)
+    if model_engine is not None:
+        is_matched, model_engine = match_engine_from_spell(
+            model_engine, list(llm_engines.keys())
+        )
+        if not is_matched:
+            print(
+                f'Xinference does not support this inference engine "{model_engine}".',
+                file=sys.stderr,
+            )
+            return
+
+    table = []
+    engines = [model_engine] if model_engine is not None else list(llm_engines.keys())
+    for engine in engines:
+        params = llm_engines[engine]
+        for param in params:
+            if (
+                (model_format is None or model_format == param["model_format"])
+                and (
+                    model_size_in_billions is None
+                    or model_size_in_billions == str(param["model_size_in_billions"])
+                )
+                and (quantization is None or quantization in param["quantizations"])
+            ):
+                if quantization is not None:
+                    table.append(
+                        [
+                            model_name,
+                            engine,
+                            param["model_format"],
+                            param["model_size_in_billions"],
+                            quantization,
+                        ]
+                    )
+                else:
+                    for quant in param["quantizations"]:
+                        table.append(
+                            [
+                                model_name,
+                                engine,
+                                param["model_format"],
+                                param["model_size_in_billions"],
+                                quant,
+                            ]
+                        )
+    if len(table) == 0:
+        print(
+            f"Xinference does not support "
+            f"your provided params: {', '.join(user_specified_params)} for the model {model_name}.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            tabulate(
+                table,
+                headers=[
+                    "Name",
+                    "Engine",
+                    "Format",
+                    "Size (in billions)",
+                    "Quantization",
+                ],
+            ),
+            file=sys.stderr,
+        )
+
+
+@cli.command(
+    "cal-model-mem",
+    help="calculate gpu mem usage with specified model size and context_length",
+)
+@click.option(
+    "--model-name",
+    "-n",
+    type=str,
+    help="The model name is optional.\
+    If provided, fetch model config from huggingface/modelscope;\
+    If not specified, use default model layer to estimate.",
+)
+@click.option(
+    "--size-in-billions",
+    "-s",
+    type=str,
+    required=True,
+    help="Specify the model size in billions of parameters. Format accept 1_8 and 1.8",
+)
+@click.option(
+    "--model-format",
+    "-f",
+    type=str,
+    required=True,
+    help="Specify the format of the model, e.g. pytorch, ggmlv3, etc.",
+)
+@click.option(
+    "--quantization",
+    "-q",
+    type=str,
+    default=None,
+    help="Define the quantization settings for the model.",
+)
+@click.option(
+    "--context-length",
+    "-c",
+    type=int,
+    required=True,
+    help="Specify the context length",
+)
+@click.option(
+    "--kv-cache-dtype",
+    type=int,
+    default=16,
+    help="Specified the kv_cache_dtype, one of: 8, 16, 32",
+)
+def cal_model_mem(
+    model_name: Optional[str],
+    size_in_billions: str,
+    model_format: str,
+    quantization: Optional[str],
+    context_length: int,
+    kv_cache_dtype: int,
+):
+    if kv_cache_dtype not in [8, 16, 32]:
+        print("Invalid kv_cache_dtype:", kv_cache_dtype)
+        os._exit(1)
+
+    import math
+
+    from ..model.llm.llm_family import convert_model_size_to_float
+    from ..model.llm.memory import estimate_llm_gpu_memory
+
+    mem_info = estimate_llm_gpu_memory(
+        model_size_in_billions=size_in_billions,
+        quantization=quantization,
+        context_length=context_length,
+        model_format=model_format,
+        model_name=model_name,
+        kv_cache_dtype=kv_cache_dtype,
+    )
+    if mem_info is None:
+        print("The Specified model parameters is not match: `%s`" % model_name)
+        os._exit(1)
+    total_mem_g = math.ceil(mem_info.total / 1024.0)
+    print("model_name:", model_name)
+    print("kv_cache_dtype:", kv_cache_dtype)
+    print("model size: %.1f B" % (convert_model_size_to_float(size_in_billions)))
+    print("quant: %s" % (quantization))
+    print("context: %d" % (context_length))
+    print("gpu mem usage:")
+    print("  model mem: %d MB" % (mem_info.model_mem))
+    print("  kv_cache: %d MB" % (mem_info.kv_cache_mem))
+    print("  overhead: %d MB" % (mem_info.overhead))
+    print("  active: %d MB" % (mem_info.activation_mem))
+    print("  total: %d MB (%d GB)" % (mem_info.total, total_mem_g))
 
 
 if __name__ == "__main__":

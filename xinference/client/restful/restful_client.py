@@ -13,7 +13,6 @@
 # limitations under the License.
 import json
 import typing
-import warnings
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Union
 
 import requests
@@ -33,6 +32,17 @@ if TYPE_CHECKING:
         LlamaCppGenerateConfig,
         PytorchGenerateConfig,
     )
+
+
+def convert_float_to_int_or_str(model_size: float) -> Union[int, str]:
+    """convert float to int or string
+
+    if float can be presented as int, convert it to int, otherwise convert it to string
+    """
+    if int(model_size) == model_size:
+        return int(model_size)
+    else:
+        return str(model_size)
 
 
 def _get_error_string(response: requests.Response) -> str:
@@ -80,7 +90,7 @@ class RESTfulModelHandle:
 
 
 class RESTfulEmbeddingModelHandle(RESTfulModelHandle):
-    def create_embedding(self, input: Union[str, List[str]]) -> "Embedding":
+    def create_embedding(self, input: Union[str, List[str]], **kwargs) -> "Embedding":
         """
         Create an Embedding from user input via RESTful APIs.
 
@@ -102,7 +112,11 @@ class RESTfulEmbeddingModelHandle(RESTfulModelHandle):
 
         """
         url = f"{self._base_url}/v1/embeddings"
-        request_body = {"model": self._model_uid, "input": input}
+        request_body = {
+            "model": self._model_uid,
+            "input": input,
+        }
+        request_body.update(kwargs)
         response = requests.post(url, json=request_body, headers=self.auth_headers)
         if response.status_code != 200:
             raise RuntimeError(
@@ -121,6 +135,7 @@ class RESTfulRerankModelHandle(RESTfulModelHandle):
         top_n: Optional[int] = None,
         max_chunks_per_doc: Optional[int] = None,
         return_documents: Optional[bool] = None,
+        **kwargs,
     ):
         """
         Returns an ordered list of documents ordered by their relevance to the provided query.
@@ -156,6 +171,7 @@ class RESTfulRerankModelHandle(RESTfulModelHandle):
             "max_chunks_per_doc": max_chunks_per_doc,
             "return_documents": return_documents,
         }
+        request_body.update(kwargs)
         response = requests.post(url, json=request_body, headers=self.auth_headers)
         if response.status_code != 200:
             raise RuntimeError(
@@ -549,6 +565,7 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
         prompt: Optional[str] = None,
         response_format: Optional[str] = "json",
         temperature: Optional[float] = 0,
+        timestamp_granularities: Optional[List[str]] = None,
     ):
         """
         Transcribes audio into the input language.
@@ -572,6 +589,11 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
             while lower values like 0.2 will make it more focused and deterministic.
             If set to 0, the model will use log probability to automatically increase the temperature
             until certain thresholds are hit.
+        timestamp_granularities: Optional[List[str]], default is None.
+            The timestamp granularities to populate for this transcription. response_format must be set verbose_json
+            to use timestamp granularities. Either or both of these options are supported: word, or segment.
+            Note: There is no additional latency for segment timestamps, but generating word timestamps incurs
+            additional latency.
 
         Returns
         -------
@@ -584,12 +606,13 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
             "prompt": prompt,
             "response_format": response_format,
             "temperature": temperature,
+            "timestamp_granularities[]": timestamp_granularities,
         }
         files: List[Any] = []
-        for key, value in params.items():
-            files.append((key, (None, value)))
         files.append(("file", ("file", audio, "application/octet-stream")))
-        response = requests.post(url, files=files, headers=self.auth_headers)
+        response = requests.post(
+            url, data=params, files=files, headers=self.auth_headers
+        )
         if response.status_code != 200:
             raise RuntimeError(
                 f"Failed to transcribe the audio, detail: {_get_error_string(response)}"
@@ -601,9 +624,11 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
     def translations(
         self,
         audio: bytes,
+        language: Optional[str] = None,
         prompt: Optional[str] = None,
         response_format: Optional[str] = "json",
         temperature: Optional[float] = 0,
+        timestamp_granularities: Optional[List[str]] = None,
     ):
         """
         Translates audio into English.
@@ -614,6 +639,9 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
         audio: bytes
             The audio file object (not file name) to transcribe, in one of these formats: flac, mp3, mp4, mpeg,
             mpga, m4a, ogg, wav, or webm.
+        language: Optional[str]
+            The language of the input audio. Supplying the input language in ISO-639-1
+            (https://en.wikipedia.org/wiki/List_of_ISO_639_language_codes) format will improve accuracy and latency.
         prompt: Optional[str]
             An optional text to guide the model's style or continue a previous audio segment.
             The prompt should match the audio language.
@@ -624,6 +652,11 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
             while lower values like 0.2 will make it more focused and deterministic.
             If set to 0, the model will use log probability to automatically increase the temperature
             until certain thresholds are hit.
+        timestamp_granularities: Optional[List[str]], default is None.
+            The timestamp granularities to populate for this transcription. response_format must be set verbose_json
+            to use timestamp granularities. Either or both of these options are supported: word, or segment.
+            Note: There is no additional latency for segment timestamps, but generating word timestamps incurs
+            additional latency.
 
         Returns
         -------
@@ -632,15 +665,17 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
         url = f"{self._base_url}/v1/audio/translations"
         params = {
             "model": self._model_uid,
+            "language": language,
             "prompt": prompt,
             "response_format": response_format,
             "temperature": temperature,
+            "timestamp_granularities[]": timestamp_granularities,
         }
         files: List[Any] = []
-        for key, value in params.items():
-            files.append((key, (None, value)))
         files.append(("file", ("file", audio, "application/octet-stream")))
-        response = requests.post(url, files=files, headers=self.auth_headers)
+        response = requests.post(
+            url, data=params, files=files, headers=self.auth_headers
+        )
         if response.status_code != 200:
             raise RuntimeError(
                 f"Failed to translate the audio, detail: {_get_error_string(response)}"
@@ -651,11 +686,13 @@ class RESTfulAudioModelHandle(RESTfulModelHandle):
 
 
 class Client:
-    def __init__(self, base_url):
+    def __init__(self, base_url, api_key: Optional[str] = None):
         self.base_url = base_url
-        self._headers = {}
+        self._headers: Dict[str, str] = {}
         self._cluster_authed = False
         self._check_cluster_authenticated()
+        if api_key is not None and self._cluster_authed:
+            self._headers["Authorization"] = f"Bearer {api_key}"
 
     def _set_token(self, token: Optional[str]):
         if not self._cluster_authed or token is None:
@@ -735,66 +772,21 @@ class Client:
         model_list = response_data["data"]
         return {item["id"]: item for item in model_list}
 
-    def launch_speculative_llm(
-        self,
-        model_name: str,
-        model_size_in_billions: Optional[int],
-        quantization: Optional[str],
-        draft_model_name: str,
-        draft_model_size_in_billions: Optional[int],
-        draft_quantization: Optional[str],
-        n_gpu: Optional[Union[int, str]] = "auto",
-    ):
-        """
-        Launch the LLM along with a draft model based on the parameters on the server via RESTful APIs. This is an
-        experimental feature and the API may change in the future.
-
-        Returns
-        -------
-        str
-            The unique model_uid for the launched model.
-
-        """
-        warnings.warn(
-            "`launch_speculative_llm` is an experimental feature and the API may change in the future."
-        )
-
-        payload = {
-            "model_uid": None,
-            "model_name": model_name,
-            "model_size_in_billions": model_size_in_billions,
-            "quantization": quantization,
-            "draft_model_name": draft_model_name,
-            "draft_model_size_in_billions": draft_model_size_in_billions,
-            "draft_quantization": draft_quantization,
-            "n_gpu": n_gpu,
-        }
-
-        url = f"{self.base_url}/experimental/speculative_llms"
-        response = requests.post(url, json=payload, headers=self._headers)
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"Failed to launch model, detail: {_get_error_string(response)}"
-            )
-
-        response_data = response.json()
-        model_uid = response_data["model_uid"]
-        return model_uid
-
     def launch_model(
         self,
         model_name: str,
         model_type: str = "LLM",
+        model_engine: Optional[str] = None,
         model_uid: Optional[str] = None,
-        model_size_in_billions: Optional[Union[int, str]] = None,
+        model_size_in_billions: Optional[Union[int, str, float]] = None,
         model_format: Optional[str] = None,
         quantization: Optional[str] = None,
         replica: int = 1,
         n_gpu: Optional[Union[int, str]] = "auto",
+        peft_model_config: Optional[Dict] = None,
         request_limits: Optional[int] = None,
-        peft_model_path: Optional[str] = None,
-        image_lora_load_kwargs: Optional[Dict] = None,
-        image_lora_fuse_kwargs: Optional[Dict] = None,
+        worker_ip: Optional[str] = None,
+        gpu_idx: Optional[Union[int, List[int]]] = None,
         **kwargs,
     ) -> str:
         """
@@ -806,9 +798,11 @@ class Client:
             The name of model.
         model_type: str
             type of model.
+        model_engine: Optional[str]
+            Specify the inference engine of the model when launching LLM.
         model_uid: str
             UID of model, auto generate a UUID if is None.
-        model_size_in_billions: Optional[int]
+        model_size_in_billions: Optional[Union[int, str, float]]
             The size (in billions) of the model.
         model_format: Optional[str]
             The format of the model.
@@ -819,15 +813,17 @@ class Client:
         n_gpu: Optional[Union[int, str]],
             The number of GPUs used by the model, default is "auto".
             ``n_gpu=None`` means cpu only, ``n_gpu=auto`` lets the system automatically determine the best number of GPUs to use.
+        peft_model_config: Optional[Dict]
+            - "lora_list": A List of PEFT (Parameter-Efficient Fine-Tuning) model and path.
+            - "image_lora_load_kwargs": A Dict of lora load parameters for image model
+            - "image_lora_fuse_kwargs": A Dict of lora fuse parameters for image model
         request_limits: Optional[int]
-            The number of request limits for this model， default is None.
+            The number of request limits for this model, default is None.
             ``request_limits=None`` means no limits for this model.
-        peft_model_path: Optional[str]
-            PEFT (Parameter-Efficient Fine-Tuning) model path.
-        image_lora_load_kwargs: Optional[Dict]
-            lora load parameters for image model
-        image_lora_fuse_kwargs: Optional[Dict]
-            lora fuse parameters for image model
+        worker_ip: Optional[str]
+            Specify the worker ip where the model is located in a distributed scenario.
+        gpu_idx: Optional[Union[int, List[int]]]
+            Specify the GPU index where the model is located.
         **kwargs:
             Any other parameters been specified.
 
@@ -840,9 +836,15 @@ class Client:
 
         url = f"{self.base_url}/v1/models"
 
+        # convert float to int or string since the RESTful API does not accept float.
+        if isinstance(model_size_in_billions, float):
+            model_size_in_billions = convert_float_to_int_or_str(model_size_in_billions)
+
         payload = {
             "model_uid": model_uid,
             "model_name": model_name,
+            "model_engine": model_engine,
+            "peft_model_config": peft_model_config,
             "model_type": model_type,
             "model_size_in_billions": model_size_in_billions,
             "model_format": model_format,
@@ -850,9 +852,8 @@ class Client:
             "replica": replica,
             "n_gpu": n_gpu,
             "request_limits": request_limits,
-            "peft_model_path": peft_model_path,
-            "image_lora_load_kwargs": image_lora_load_kwargs,
-            "image_lora_fuse_kwargs": image_lora_fuse_kwargs,
+            "worker_ip": worker_ip,
+            "gpu_idx": gpu_idx,
         }
 
         for key, value in kwargs.items():
@@ -1101,6 +1102,35 @@ class Client:
         response_data = response.json()
         return response_data
 
+    def list_cached_models(self) -> List[Dict[Any, Any]]:
+        """
+        Get a list of cached models.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        List[Dict[Any, Any]]
+            The collection of cached models on the server.
+
+        Raises
+        ------
+        RuntimeError
+            Raised when the request fails, including the reason for the failure.
+        """
+
+        url = f"{self.base_url}/v1/cached/list_cached_models"
+        response = requests.get(url, headers=self._headers)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Failed to list cached model, detail: {_get_error_string(response)}"
+            )
+
+        response_data = response.json()
+        return response_data
+
     def get_model_registration(
         self, model_type: str, model_name: str
     ) -> Dict[str, Any]:
@@ -1124,6 +1154,29 @@ class Client:
         if response.status_code != 200:
             raise RuntimeError(
                 f"Failed to list model registration, detail: {_get_error_string(response)}"
+            )
+
+        response_data = response.json()
+        return response_data
+
+    def query_engine_by_model_name(self, model_name: str):
+        """
+        Get the engine parameters with the model name registered on the server.
+
+        Parameters
+        ----------
+        model_name: str
+            The name of the model.
+        Returns
+        -------
+        Dict[str, List[Dict[str, Any]]]
+            The supported engine parameters of registered models on the server.
+        """
+        url = f"{self.base_url}/v1/engines/{model_name}"
+        response = requests.get(url, headers=self._headers)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Failed to query engine parameters by model name, detail: {_get_error_string(response)}"
             )
 
         response_data = response.json()

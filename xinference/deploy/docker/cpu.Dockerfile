@@ -6,7 +6,7 @@ ENV NVM_DIR /usr/local/nvm
 ENV NODE_VERSION 14.21.1
 
 RUN apt-get -y update \
-  && apt install -y build-essential curl procps git \
+  && apt install -y build-essential curl procps git libgl1 \
   && mkdir -p $NVM_DIR \
   && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
   && . $NVM_DIR/nvm.sh \
@@ -23,6 +23,7 @@ RUN python -m pip install --upgrade -i "$PIP_INDEX" pip && \
     pip install -i "$PIP_INDEX" \
       "xoscar>=0.3.0" \
       "gradio>=3.39.0" \
+      "typer[all]<0.12.0" \
       pillow \
       click \
       "tqdm>=4.27" \
@@ -31,7 +32,7 @@ RUN python -m pip install --upgrade -i "$PIP_INDEX" pip && \
       pydantic \
       fastapi \
       uvicorn \
-      "huggingface-hub>=0.19.4,<1.0" \
+      "huggingface-hub>=0.19.4" \
       typing_extensions \
       "fsspec>=2023.1.0,<=2023.10.0" \
       s3fs \
@@ -52,14 +53,17 @@ RUN python -m pip install --upgrade -i "$PIP_INDEX" pip && \
       einops \
       tiktoken \
       "sentence-transformers>=2.3.1" \
+      FlagEmbedding \
       diffusers \
       controlnet_aux \
       orjson \
       auto-gptq \
       optimum \
-      peft && \
+      peft \
+      timm \
+      opencv-contrib-python-headless && \
     pip install -i "$PIP_INDEX" -U chatglm-cpp && \
-    pip install -i "$PIP_INDEX" -U llama-cpp-python && \
+    pip install -i "$PIP_INDEX" "llama-cpp-python>=0.2.25,!=0.2.58" && \
     cd /opt/inference && \
     python setup.py build_web && \
     git restore . && \

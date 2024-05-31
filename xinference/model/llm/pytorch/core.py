@@ -32,6 +32,7 @@ from ....types import (
     Embedding,
     EmbeddingData,
     EmbeddingUsage,
+    LoRA,
     PytorchGenerateConfig,
     PytorchModelConfig,
 )
@@ -41,6 +42,28 @@ from ..llm_family import LLMFamilyV1, LLMSpecV1
 from ..utils import ChatModelMixin
 
 logger = logging.getLogger(__name__)
+
+NON_DEFAULT_MODEL_LIST: List[str] = [
+    "baichuan-chat",
+    "baichuan-2-chat",
+    "vicuna-v1.3",
+    "falcon",
+    "falcon-instruct",
+    "chatglm",
+    "chatglm2",
+    "chatglm2-32k",
+    "chatglm2-128k",
+    "llama-2",
+    "llama-2-chat",
+    "internlm2-chat",
+    "qwen-vl-chat",
+    "OmniLMM",
+    "yi-vl-chat",
+    "deepseek-vl-chat",
+    "internvl-chat",
+    "mini-internvl-chat",
+    "cogvlm2",
+]
 
 
 class PytorchModel(LLM):
@@ -52,14 +75,14 @@ class PytorchModel(LLM):
         quantization: str,
         model_path: str,
         pytorch_model_config: Optional[PytorchModelConfig] = None,
-        peft_model_path: Optional[str] = None,
+        peft_model: Optional[List[LoRA]] = None,
     ):
         super().__init__(model_uid, model_family, model_spec, quantization, model_path)
         self._use_fast_tokenizer = True
         self._pytorch_model_config: PytorchModelConfig = self._sanitize_model_config(
             pytorch_model_config
         )
-        self._peft_model_path = peft_model_path
+        self._peft_model = peft_model
 
     def _sanitize_model_config(
         self, pytorch_model_config: Optional[PytorchModelConfig]
@@ -115,7 +138,7 @@ class PytorchModel(LLM):
         return model, tokenizer
 
     def _apply_lora(self):
-        if self._peft_model_path is not None:
+        if self._peft_model is not None:
             try:
                 from peft import PeftModel
             except ImportError:
@@ -123,14 +146,20 @@ class PytorchModel(LLM):
                     f"Failed to import 'PeftModel' from 'peft'. Please make sure 'peft' is installed.\n\n"
                 )
 
-            # Apply LoRA
-            self._model = PeftModel.from_pretrained(
-                self._model,
-                self._peft_model_path,
-            )
-            logger.info(
-                f"Successfully loaded the PEFT adaptor for model {self.model_uid}."
-            )
+            for i, peft_model in enumerate(self._peft_model):
+                if i == 0:
+                    self._model = PeftModel.from_pretrained(
+                        self._model,
+                        peft_model.local_path,
+                        adapter_name=peft_model.lora_name,
+                    )
+                else:
+                    self._model.load_adapter(
+                        peft_model.local_path, adapter_name=peft_model.lora_name
+                    )
+                logger.info(
+                    f"PEFT adaptor '{peft_model.lora_name}' successfully loaded for model '{self.model_uid}'."
+                )
 
     def load(self):
         try:
@@ -233,17 +262,7 @@ class PytorchModel(LLM):
         if llm_spec.model_format not in ["pytorch", "gptq", "awq"]:
             return False
         model_family = llm_family.model_family or llm_family.model_name
-        if model_family in [
-            "baichuan-chat",
-            "vicuna-v1.3",
-            "falcon",
-            "falcon-instruct",
-            "chatglm",
-            "chatglm2",
-            "chatglm2-32k",
-            "llama-2",
-            "llama-2-chat",
-        ]:
+        if model_family in NON_DEFAULT_MODEL_LIST:
             return False
         if "generate" not in llm_family.model_ability:
             return False
@@ -290,6 +309,18 @@ class PytorchModel(LLM):
 
         assert self._model is not None
         assert self._tokenizer is not None
+
+        lora_model = generate_config.pop("lora_name")
+
+        if lora_model is not None and self._peft_model is not None:
+            for lora in self._peft_model:
+                if lora_model == lora.lora_name:
+                    self._model.set_adapter(lora_model)
+                    logger.info(f"Set lora model to {lora_model}")
+                    break
+            else:
+                self._model.disable_adapter()
+                logger.info(f"No lora model {lora_model} found, skip setting")
 
         stream = generate_config.get("stream", False)
         if not stream:
@@ -412,7 +443,7 @@ class PytorchChatModel(PytorchModel, ChatModelMixin):
         quantization: str,
         model_path: str,
         pytorch_model_config: Optional[PytorchModelConfig] = None,
-        peft_model_path: Optional[str] = None,
+        peft_model: Optional[List[LoRA]] = None,
     ):
         super().__init__(
             model_uid,
@@ -421,7 +452,7 @@ class PytorchChatModel(PytorchModel, ChatModelMixin):
             quantization,
             model_path,
             pytorch_model_config,
-            peft_model_path,
+            peft_model,
         )
 
     def _sanitize_generate_config(
@@ -452,21 +483,8 @@ class PytorchChatModel(PytorchModel, ChatModelMixin):
     ) -> bool:
         if llm_spec.model_format not in ["pytorch", "gptq", "awq"]:
             return False
-        if llm_family.model_name in [
-            "baichuan-chat",
-            "baichuan-2-chat",
-            "vicuna-v1.3",
-            "falcon",
-            "falcon-instruct",
-            "chatglm",
-            "chatglm2",
-            "chatglm2-32k",
-            "llama-2",
-            "llama-2-chat",
-            "internlm2-chat",
-            "qwen-vl-chat",
-            "yi-vl-chat",
-        ]:
+        model_family = llm_family.model_family or llm_family.model_name
+        if model_family in NON_DEFAULT_MODEL_LIST:
             return False
         if "chat" not in llm_family.model_ability:
             return False

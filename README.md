@@ -26,23 +26,25 @@ potential of cutting-edge AI models.
 
 ## 🔥 Hot Topics
 ### Framework Enhancements
+- Support specifying worker and GPU indexes for launching models: [#1195](https://github.com/xorbitsai/inference/pull/1195)
+- Support SGLang backend: [#1161](https://github.com/xorbitsai/inference/pull/1161)
 - Support LoRA for LLM and image models: [#1080](https://github.com/xorbitsai/inference/pull/1080)
 - Support speech recognition model: [#929](https://github.com/xorbitsai/inference/pull/929)
 - Metrics support: [#906](https://github.com/xorbitsai/inference/pull/906)
 - Docker image: [#855](https://github.com/xorbitsai/inference/pull/855)
 - Support multimodal: [#829](https://github.com/xorbitsai/inference/pull/829)
-- Auto recover: [#694](https://github.com/xorbitsai/inference/pull/694)
-- Function calling API: [#701](https://github.com/xorbitsai/inference/pull/701), here's example: https://github.com/xorbitsai/inference/blob/main/examples/FunctionCall.ipynb
 ### New Models
-- Built-in support for [Gemma](https://github.com/google-deepmind/gemma): [#1024](https://github.com/xorbitsai/inference/pull/1024)
-- Built-in support for [Qwen1.5](https://github.com/QwenLM/Qwen1.5): [#994](https://github.com/xorbitsai/inference/pull/994)
-- Built-in support for [Yi-VL](https://github.com/01-ai/Yi): [#946](https://github.com/xorbitsai/inference/pull/946)
-- Built-in support for [Whisper](https://github.com/openai/whisper): [#929](https://github.com/xorbitsai/inference/pull/929)
-- Built-in support for [Orion-chat](https://huggingface.co/OrionStarAI): [#933](https://github.com/xorbitsai/inference/pull/933)
-- Built-in support for [InternLM2-chat](https://huggingface.co/internlm/internlm2-chat-7b): [#829](https://github.com/xorbitsai/inference/pull/913)
+- Built-in support for [CogVLM2](https://github.com/THUDM/CogVLM2): [#1551](https://github.com/xorbitsai/inference/pull/1551)
+- Built-in support for [InternVL-Chat-V1-5](https://github.com/OpenGVLab/InternVL): [#1536](https://github.com/xorbitsai/inference/pull/1536)
+- Built-in support for [Yi-1.5](https://github.com/01-ai/Yi-1.5): [#1489](https://github.com/xorbitsai/inference/pull/1489)
+- Built-in support for [Llama 3](https://github.com/meta-llama/llama3): [#1332](https://github.com/xorbitsai/inference/pull/1332)
+- Built-in support for [Qwen1.5 110B](https://huggingface.co/Qwen/Qwen1.5-110B-Chat): [#1388](https://github.com/xorbitsai/inference/pull/1388)
+- Built-in support for [Mixtral-8x22B-instruct-v0.1](https://huggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1): [#1340](https://github.com/xorbitsai/inference/pull/1340)
 ### Integrations
 - [Dify](https://docs.dify.ai/advanced/model-configuration/xinference): an LLMOps platform that enables developers (and even non-developers) to quickly build useful applications based on large language models, ensuring they are visual, operable, and improvable.
+- [FastGPT](https://github.com/labring/FastGPT): a knowledge-based platform built on the LLM, offers out-of-the-box data processing and model invocation capabilities, allows for workflow orchestration through Flow visualization.
 - [Chatbox](https://chatboxai.app/): a desktop client for multiple cutting-edge LLM models, available on Windows, Mac and Linux.
+- [RAGFlow](https://github.com/infiniflow/ragflow): is an open-source RAG engine based on deep document understanding.
 
 
 ## Key Features

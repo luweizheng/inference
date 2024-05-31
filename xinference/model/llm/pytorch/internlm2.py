@@ -23,6 +23,7 @@ from ....types import (
     CompletionChoice,
     CompletionChunk,
     CompletionUsage,
+    LoRA,
     PytorchGenerateConfig,
 )
 from ..llm_family import LLMFamilyV1, LLMSpecV1
@@ -38,7 +39,7 @@ class Internlm2PytorchChatModel(PytorchChatModel):
         quantization: str,
         model_path: str,
         pytorch_model_config: Optional[PytorchModelConfig] = None,
-        peft_model_path: Optional[str] = None,
+        peft_model: Optional[List[LoRA]] = None,
     ):
         super().__init__(
             model_uid,
@@ -47,7 +48,7 @@ class Internlm2PytorchChatModel(PytorchChatModel):
             quantization,
             model_path,
             pytorch_model_config=pytorch_model_config,
-            peft_model_path=peft_model_path,
+            peft_model=peft_model,
         )
 
     def _load_model(self, **kwargs):
@@ -107,6 +108,12 @@ class Internlm2PytorchChatModel(PytorchChatModel):
             kwargs["max_length"] = int(max_new_tokens)
 
         stream = generate_config.get("stream", False)
+        stream_options = generate_config.pop("stream_options", None)
+        include_usage = (
+            stream_options["include_usage"]
+            if isinstance(stream_options, dict)
+            else False
+        )
         if chat_history:
             input_history = [
                 (chat_history[i]["content"], (chat_history[i + 1]["content"]))
@@ -114,14 +121,22 @@ class Internlm2PytorchChatModel(PytorchChatModel):
             ]
         else:
             input_history = []
+        if system_prompt:
+            kwargs["meta_instruction"] = system_prompt
         if stream:
 
             def _stream_generator():
                 last_chunk_text_length = 0
                 chunk_id = "chat-" + str(uuid.uuid1())
+                prompt_tokens, completion_tokens, total_tokens = 0, 0, 0
+                inputs = self._tokenizer([prompt], return_tensors="pt")
+                inputs = inputs.to(self._model.device)
+                prompt_tokens = len(inputs["input_ids"][0])
                 for chunk_text, _ in self._model.stream_chat(
-                    self._tokenizer, prompt, input_history, **kwargs
+                    self._tokenizer, prompt, chat_history, **kwargs
                 ):
+                    completion_tokens = completion_tokens + 1
+                    total_tokens = prompt_tokens + completion_tokens
                     chunk_text = chunk_text[last_chunk_text_length:]
                     last_chunk_text_length += len(chunk_text)
                     completion_choice = CompletionChoice(
@@ -133,7 +148,26 @@ class Internlm2PytorchChatModel(PytorchChatModel):
                         created=int(time.time()),
                         model=self.model_uid,
                         choices=[completion_choice],
+                        usage=CompletionUsage(
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            total_tokens=total_tokens,
+                        ),
                     )
+                if include_usage:
+                    chunk = CompletionChunk(
+                        id=chunk_id,
+                        object="text_completion",
+                        created=int(time.time()),
+                        model=self.model_uid,
+                        choices=[],
+                    )
+                    chunk["usage"] = CompletionUsage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                    )
+                    yield chunk
 
             return self._to_chat_completion_chunks(_stream_generator())
         else:

@@ -13,10 +13,13 @@ import fetcher from '../../components/fetcher'
 import Title from '../../components/Title'
 
 const RunningModels = () => {
-  const [tabValue, setTabValue] = React.useState('1')
+  const [tabValue, setTabValue] = React.useState(
+    sessionStorage.getItem('runningModelType')
+  )
   const [llmData, setLlmData] = useState([])
   const [embeddingModelData, setEmbeddingModelData] = useState([])
   const [imageModelData, setImageModelData] = useState([])
+  const [audioModelData, setAudioModelData] = useState([])
   const [rerankModelData, setRerankModelData] = useState([])
   const { isCallingApi, setIsCallingApi } = useContext(ApiContext)
   const { isUpdatingModel, setIsUpdatingModel } = useContext(ApiContext)
@@ -27,19 +30,24 @@ const RunningModels = () => {
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue)
+    navigate(newValue)
+    sessionStorage.setItem('runningModelType', newValue)
   }
 
   const update = (isCallingApi) => {
     if (cookie.token === '' || cookie.token === undefined) {
       return
     }
-    if (cookie.token === 'need_auth') {
+    if (cookie.token !== 'no_auth' && !sessionStorage.getItem('token')) {
       navigate('/login', { replace: true })
       return
     }
     if (isCallingApi) {
       setLlmData([{ id: 'Loading, do not refresh page...', url: 'IS_LOADING' }])
       setEmbeddingModelData([
+        { id: 'Loading, do not refresh page...', url: 'IS_LOADING' },
+      ])
+      setAudioModelData([
         { id: 'Loading, do not refresh page...', url: 'IS_LOADING' },
       ])
       setImageModelData([
@@ -50,7 +58,7 @@ const RunningModels = () => {
       ])
     } else {
       setIsUpdatingModel(true)
-      fetcher(`${endPoint}/v1/models/`, {
+      fetcher(`${endPoint}/v1/models`, {
         method: 'GET',
       })
         .then((response) => {
@@ -67,6 +75,7 @@ const RunningModels = () => {
               const newLlmData = []
               const newEmbeddingModelData = []
               const newImageModelData = []
+              const newAudioModelData = []
               const newRerankModelData = []
               response.data.forEach((model) => {
                 let newValue = {
@@ -78,6 +87,8 @@ const RunningModels = () => {
                   newLlmData.push(newValue)
                 } else if (newValue.model_type === 'embedding') {
                   newEmbeddingModelData.push(newValue)
+                } else if (newValue.model_type === 'audio') {
+                  newAudioModelData.push(newValue)
                 } else if (newValue.model_type === 'image') {
                   newImageModelData.push(newValue)
                 } else if (newValue.model_type === 'rerank') {
@@ -86,6 +97,7 @@ const RunningModels = () => {
               })
               setLlmData(newLlmData)
               setEmbeddingModelData(newEmbeddingModelData)
+              setAudioModelData(newAudioModelData)
               setImageModelData(newImageModelData)
               setRerankModelData(newRerankModelData)
               setIsUpdatingModel(false)
@@ -399,7 +411,6 @@ const RunningModels = () => {
       },
     },
   ]
-
   const imageModelColumns = [
     {
       field: 'id',
@@ -577,7 +588,7 @@ const RunningModels = () => {
       },
     },
   ]
-
+  const audioModelColumns = embeddingModelColumns
   const rerankModelColumns = embeddingModelColumns
 
   const dataGridStyle = {
@@ -634,13 +645,14 @@ const RunningModels = () => {
             onChange={handleTabChange}
             aria-label="tabs"
           >
-            <Tab label="Language Models" value="1" />
-            <Tab label="Embedding Models" value="2" />
-            <Tab label="Rerank models" value="3" />
-            <Tab label="Image models" value="4" />
+            <Tab label="Language Models" value="/running_models/LLM" />
+            <Tab label="Embedding Models" value="/running_models/embedding" />
+            <Tab label="Rerank models" value="/running_models/rerank" />
+            <Tab label="Image models" value="/running_models/image" />
+            <Tab label="Audio models" value="/running_models/audio" />
           </TabList>
         </Box>
-        <TabPanel value="1" sx={{ padding: 0 }}>
+        <TabPanel value="/running_models/LLM" sx={{ padding: 0 }}>
           <Box sx={{ height: '100%', width: '100%' }}>
             <DataGrid
               rows={llmData}
@@ -654,7 +666,7 @@ const RunningModels = () => {
             />
           </Box>
         </TabPanel>
-        <TabPanel value="2" sx={{ padding: 0 }}>
+        <TabPanel value="/running_models/embedding" sx={{ padding: 0 }}>
           <Box sx={{ height: '100%', width: '100%' }}>
             <DataGrid
               rows={embeddingModelData}
@@ -668,7 +680,7 @@ const RunningModels = () => {
             />
           </Box>
         </TabPanel>
-        <TabPanel value="3" sx={{ padding: 0 }}>
+        <TabPanel value="/running_models/rerank" sx={{ padding: 0 }}>
           <Box sx={{ height: '100%', width: '100%' }}>
             <DataGrid
               rows={rerankModelData}
@@ -682,11 +694,25 @@ const RunningModels = () => {
             />
           </Box>
         </TabPanel>
-        <TabPanel value="4" sx={{ padding: 0 }}>
+        <TabPanel value="/running_models/image" sx={{ padding: 0 }}>
           <Box sx={{ height: '100%', width: '100%' }}>
             <DataGrid
               rows={imageModelData}
               columns={imageModelColumns}
+              autoHeight={true}
+              sx={dataGridStyle}
+              slots={{
+                noRowsOverlay: noRowsOverlay,
+                noResultsOverlay: noResultsOverlay,
+              }}
+            />
+          </Box>
+        </TabPanel>
+        <TabPanel value="/running_models/audio" sx={{ padding: 0 }}>
+          <Box sx={{ height: '100%', width: '100%' }}>
+            <DataGrid
+              rows={audioModelData}
+              columns={audioModelColumns}
               autoHeight={true}
               sx={dataGridStyle}
               slots={{

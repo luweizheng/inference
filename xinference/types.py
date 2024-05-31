@@ -33,6 +33,7 @@ from .fields import (
     stop_field,
     stream_field,
     stream_interval_field,
+    stream_option_field,
     temperature_field,
     top_k_field,
     top_p_field,
@@ -91,11 +92,23 @@ class CompletionLogprobs(TypedDict):
     top_logprobs: List[Optional[Dict[str, float]]]
 
 
+class ToolCallFunction(TypedDict):
+    name: str
+    arguments: str
+
+
+class ToolCalls(TypedDict):
+    id: str
+    type: Literal["function"]
+    function: ToolCallFunction
+
+
 class CompletionChoice(TypedDict):
     text: str
     index: int
     logprobs: Optional[CompletionLogprobs]
     finish_reason: Optional[str]
+    tool_calls: NotRequired[List[ToolCalls]]
 
 
 class CompletionUsage(TypedDict):
@@ -147,6 +160,7 @@ class ChatCompletion(TypedDict):
 class ChatCompletionChunkDelta(TypedDict):
     role: NotRequired[str]
     content: NotRequired[str]
+    tool_calls: NotRequired[List[ToolCalls]]
 
 
 class ChatCompletionChunkChoice(TypedDict):
@@ -173,6 +187,8 @@ class ChatglmCppGenerateConfig(TypedDict, total=False):
     top_p: float
     temperature: float
     stream: bool
+    lora_name: Optional[str]
+    stream_options: Optional[Union[dict, None]]
 
 
 class QWenCppModelConfig(TypedDict, total=False):
@@ -217,6 +233,7 @@ class LlamaCppGenerateConfig(TypedDict, total=False):
     repetition_penalty: float
     top_k: int
     stream: bool
+    stream_options: Optional[Union[dict, None]]
     tfs_z: float
     mirostat_mode: int
     mirostat_tau: float
@@ -232,6 +249,8 @@ class LlamaCppModelConfig(TypedDict, total=False):
     n_ctx: int
     n_parts: int
     n_gpu_layers: int
+    split_mode: int
+    main_gpu: int
     seed: int
     f16_kv: bool
     logits_all: bool
@@ -263,6 +282,8 @@ class PytorchGenerateConfig(TypedDict, total=False):
     stream_interval: int
     model: Optional[str]
     tools: Optional[List[Dict]]
+    lora_name: Optional[str]
+    stream_options: Optional[Union[dict, None]]
 
 
 class PytorchModelConfig(TypedDict, total=False):
@@ -334,10 +355,12 @@ class CreateCompletionTorch(BaseModel):
     stop: Optional[Union[str, List[str]]] = stop_field
     stop_token_ids: Optional[Union[int, List[int]]] = none_field
     stream: bool = stream_field
+    stream_options: Optional[Union[dict, None]] = stream_option_field
     stream_interval: int = stream_interval_field
     temperature: float = temperature_field
     top_p: float = top_p_field
     top_k: int = top_k_field
+    lora_name: Optional[str]
 
 
 CreateCompletionLlamaCpp: BaseModel
@@ -350,25 +373,12 @@ try:
         include_fields={
             "grammar": (Optional[Any], None),
             "max_tokens": (Optional[int], max_tokens_field),
+            "lora_name": (Optional[str], None),
+            "stream_options": (Optional[Union[dict, None]], None),
         },
     )
 except ImportError:
     CreateCompletionLlamaCpp = create_model("CreateCompletionLlamaCpp")
-
-CreateCompletionCTransformers: BaseModel
-try:
-    from ctransformers.llm import LLM
-
-    CreateCompletionCTransformers = get_pydantic_model_from_method(
-        LLM.generate,
-        exclude_fields=["tokens"],
-        include_fields={
-            "max_tokens": (Optional[int], max_tokens_field),
-            "stream": (Optional[bool], stream_field),
-        },
-    )
-except ImportError:
-    CreateCompletionCTransformers = create_model("CreateCompletionCTransformers")
 
 
 # This type is for openai API compatibility
@@ -392,6 +402,7 @@ class _CreateCompletionOpenAIFallback(BaseModel):
     seed: Optional[int] = none_field
     stop: Optional[Union[str, List[str]]] = stop_field
     stream: bool = stream_field
+    stream_options: Optional[Union[dict, None]] = stream_option_field
     suffix: Optional[str] = none_field
     temperature: float = temperature_field
     top_p: float = top_p_field
@@ -415,7 +426,6 @@ class CreateCompletion(
     ModelAndPrompt,
     CreateCompletionTorch,
     CreateCompletionLlamaCpp,
-    CreateCompletionCTransformers,
     CreateCompletionOpenAI,
 ):
     pass
@@ -428,8 +438,6 @@ class CreateChatModel(BaseModel):
 # Currently, chat calls generates, so the params share the same one.
 CreateChatCompletionTorch = CreateCompletionTorch
 CreateChatCompletionLlamaCpp: BaseModel = CreateCompletionLlamaCpp
-CreateChatCompletionCTransformers: BaseModel = CreateCompletionCTransformers
-
 
 # This type is for openai API compatibility
 CreateChatCompletionOpenAI: BaseModel
@@ -450,7 +458,61 @@ class CreateChatCompletion(
     CreateChatModel,
     CreateChatCompletionTorch,
     CreateChatCompletionLlamaCpp,
-    CreateChatCompletionCTransformers,
     CreateChatCompletionOpenAI,
 ):
     pass
+
+
+class LoRA:
+    def __init__(self, lora_name: str, local_path: str):
+        self.lora_name = lora_name
+        self.local_path = local_path
+
+    def to_dict(self):
+        return {
+            "lora_name": self.lora_name,
+            "local_path": self.local_path,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict):
+        return cls(
+            lora_name=data["lora_name"],
+            local_path=data["local_path"],
+        )
+
+
+class PeftModelConfig:
+    def __init__(
+        self,
+        peft_model: Optional[List[LoRA]] = None,
+        image_lora_load_kwargs: Optional[Dict] = None,
+        image_lora_fuse_kwargs: Optional[Dict] = None,
+    ):
+        self.peft_model = peft_model
+        self.image_lora_load_kwargs = image_lora_load_kwargs
+        self.image_lora_fuse_kwargs = image_lora_fuse_kwargs
+
+    def to_dict(self):
+        return {
+            "lora_list": [lora.to_dict() for lora in self.peft_model]
+            if self.peft_model
+            else None,
+            "image_lora_load_kwargs": self.image_lora_load_kwargs,
+            "image_lora_fuse_kwargs": self.image_lora_fuse_kwargs,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict):
+        peft_model_list = data.get("lora_list", None)
+        peft_model = (
+            [LoRA.from_dict(lora_dict) for lora_dict in peft_model_list]
+            if peft_model_list is not None
+            else None
+        )
+
+        return cls(
+            peft_model=peft_model,
+            image_lora_load_kwargs=data.get("image_lora_load_kwargs"),
+            image_lora_fuse_kwargs=data.get("image_lora_fuse_kwargs"),
+        )

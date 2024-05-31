@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
 import os
 import shutil
 import tempfile
@@ -20,11 +21,12 @@ import pytest
 from ....client import Client
 
 
-def test_restful_api(setup):
+@pytest.mark.parametrize("model_name", ["bge-reranker-base", "bge-reranker-v2-m3"])
+def test_restful_api(model_name, setup):
     endpoint, _ = setup
     client = Client(endpoint)
 
-    model_uid = client.launch_model(model_name="bge-reranker-base", model_type="rerank")
+    model_uid = client.launch_model(model_name=model_name, model_type="rerank")
     assert len(client.list_models()) == 1
     model = client.get_model(model_uid)
     # We want to compute the similarity between the query sentence
@@ -51,6 +53,13 @@ def test_restful_api(setup):
     assert len(scores["results"]) == 3
     assert scores["results"][0]["index"] == 0
     assert scores["results"][0]["document"] == corpus[0]
+
+    kwargs = {
+        "invalid": "invalid",
+    }
+    with pytest.raises(RuntimeError) as err:
+        scores = model.rerank(corpus, query, **kwargs)
+    assert "hasn't support" in str(err.value)
 
 
 def test_from_local_uri():
@@ -118,3 +127,17 @@ def test_register_custom_rerank():
         unregister_rerank("custom_test_d")
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_auto_detect_type():
+    from ..core import RerankModel
+
+    rerank_model_json = os.path.join(os.path.dirname(__file__), "../model_spec.json")
+    with open(rerank_model_json, "r") as f:
+        rerank_models = json.load(f)
+    for m in rerank_models:
+        try:
+            assert m["type"] == RerankModel._auto_detect_type(m["model_id"])
+        except EnvironmentError:
+            # gated repo, ignore
+            continue

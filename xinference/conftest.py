@@ -237,7 +237,7 @@ def setup_with_file_logging():
         logging_conf=TEST_FILE_LOGGING_CONF,
     )
     endpoint = f"http://localhost:{port}"
-    if not api_health_check(endpoint, max_attempts=3, sleep_interval=5):
+    if not api_health_check(endpoint, max_attempts=10, sleep_interval=5):
         raise RuntimeError("Endpoint is not available after multiple attempts")
 
     try:
@@ -261,12 +261,23 @@ def setup_with_auth():
     if not cluster_health_check(supervisor_addr, max_attempts=10, sleep_interval=3):
         raise RuntimeError("Cluster is not available after multiple attempts")
 
-    user1 = User(username="user1", password="pass1", permissions=["admin"])
-    user2 = User(username="user2", password="pass2", permissions=["models:list"])
+    user1 = User(
+        username="user1",
+        password="pass1",
+        permissions=["admin"],
+        api_keys=["sk-3sjLbdwqAhhAF", "sk-0HCRO1rauFQDL"],
+    )
+    user2 = User(
+        username="user2",
+        password="pass2",
+        permissions=["models:list"],
+        api_keys=["sk-72tkvudyGLPMi"],
+    )
     user3 = User(
         username="user3",
         password="pass3",
         permissions=["models:list", "models:read", "models:start"],
+        api_keys=["sk-m6jEzEwmCc4iQ", "sk-ZOTLIY4gt9w11"],
     )
     auth_config = AuthConfig(
         algorithm="HS256",
